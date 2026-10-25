@@ -9,3 +9,5 @@ __pycache__/
 .env
 data/daymark.sqlite
 static/
+.public-build/
+.vercel
