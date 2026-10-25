@@ -1,0 +1,116 @@
+# Daymark
+
+National wind at gate closure. A pilot for a GB day-ahead desk that buys power for delivery the next day, and has to do it with the wind forecast that had actually been published when the bid went in.
+
+The desk's two questions, and nothing else:
+
+1. What wind number could we have used at the gate?
+2. How wrong has that number been, in megawatts, so the purchase can allow for the miss?
+
+Scope is national wind only, from Elexon, for purchase decisions made on 1–31 January 2026. Delivery days are 2 January through 1 February. No demand series, no prices, and no other fuel are loaded. A flat demand can be typed on the desk; that figure is yours, and it never leaves the browser.
+
+Error is forecast minus outturn. A positive miss means the issue was high, and the desk was short of wind.
+
+## What January shows
+
+On the Nord Pool GB auction (N2EX), gate 09:50 GMT, the bid uses the 09:30 issue. Across 31 delivery days and 744 hours:
+
+- Mean absolute error is 2,013 MW. Bias is +1,730 MW. Correlation with outturn is 0.93.
+- The issue sat above outturn on 627 of 744 hours, and the day's energy was short on 28 of 31 days.
+- The issues counted on 9,682 GWh. Outturn was 8,395 GWh. The gap is 1,287 GWh.
+- Yesterday's outturn, used as a forecast, misses by 3,976 MW in a typical hour. A same-hour average of the other days in this month misses by 3,807 MW. Both are worse than the issue you could bid. The shape was good. The level was high.
+- The miss grows with the forecast. In the calmest fifth of hours the average miss is about 330 MW. In the windiest fifth it is about 3,580 MW.
+- A haircut that is a share of the forecast, fit on the other delivery days only, leaves a typical miss of 1,212 MW. A flat megawatt haircut, tested the same way, leaves 1,435 MW.
+- Moving from the 02:30 issue to the 09:30 issue changes the typical miss from 2,073 MW to 2,013 MW. The 22:30 issue, which is after the gate, would have scored 1,825 MW. A newer issue is not the lever. The level is.
+
+The EPEX hourly auction closes at 09:20 GMT, before the 09:30 issue, so that bid uses 07:30. The EPEX half-hour auction closes at 15:30 GMT, and can use the issue published at the gate. Asking for 30 minutes to get an N2EX bid in drops 09:30 and uses 07:30.
+
+Thursday 15 January, bid on Wednesday 14 January at the N2EX gate, is the day the desk opens on. The 09:30 issue counted on 280.3 GWh. Outturn was 253.6 GWh, short 26.6 GWh. A 13.4% haircut taken from the other 30 delivery days would have counted on 242.7 GWh, and the day would have been long 10.9 GWh. The 11:30 issue, published 1 hour 40 minutes after the gate, counted on 282.2 GWh and was short 28.6 GWh. Waiting would not have helped.
+
+The haircut describes this January. It is not a model to ship into February.
+
+## Sample application
+
+<!-- DEPLOY_URL -->
+The Docker image is the application. Build and open it with the commands below. A public URL is added here once the image is on Vercel or Heroku.
+
+## How to start
+
+Docker, which is the way to run the sample:
+
+```bash
+docker compose up --build
+```
+
+Then open http://localhost:8000 . The image builds the React app, loads the Elexon extracts into SQLite, and runs the test suite before the server starts. The first build takes a few minutes. Later builds reuse the layers.
+
+Two processes, for development:
+
+```bash
+cd backend
+python3 -m pip install -r requirements.txt -r requirements-dev.txt
+python3 -m daymark.build
+python3 -m pytest -q
+python3 -m uvicorn daymark.api:app --reload --port 8000
+```
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:5173 . Vite proxies `/api` to port 8000. Python 3.12 is what the image uses. The suite also passes on 3.14, with a deprecation warning from the test client.
+
+To fetch the extracts again, from `backend`:
+
+```bash
+python3 -m daymark.ingest
+python3 -m daymark.build
+```
+
+`make test`, `make api`, `make web`, and `make docker` wrap the same commands.
+
+## Files and directories
+
+```
+Dockerfile                 Two-stage image. Node builds the interface. Python builds the store, runs pytest, and serves the app.
+docker-compose.yml         Publishes port 8000 and checks /api/health.
+Makefile                   data, test, api, web, docker.
+REVIEW.md                  Timed script for the two-part video.
+backend/daymark/auctions.py    The three gates, the lead, and the January decision dates.
+backend/daymark/store.py       Reads the extracts, joins them, writes SQLite.
+backend/daymark/ingest.py      Downloads the same windows from Elexon again.
+backend/daymark/build.py       Builds the database and checks that every N2EX day scores 24 hours.
+backend/daymark/analysis.py    Chooses the issue, scores the hour, and fits the haircut.
+backend/daymark/api.py         FastAPI. /api/meta, /api/desk, /api/accuracy, /api/book.csv, and the built interface.
+backend/tests                  The selection rule, the hourly join, the haircut, and the January figures.
+backend/requirements.txt
+backend/requirements-dev.txt
+frontend/src/pages         Desk, Accuracy, Method.
+frontend/src/components    Shell, the vintage tape, the day chart, the bar charts.
+frontend/src/speech.js     The sentences on the desk.
+frontend/src/format.js     MW, GWh, and the sign of the miss.
+data/raw                   The Elexon extracts. This is the source of truth.
+data/daymark.sqlite        Built locally and inside the image. Not committed.
+```
+
+The interface is a Vite and React 18 app. Routes are `/` (the desk), `/accuracy`, and `/method`. The auction, the lead, the decision day, a counterfactual issue, and an optional demand are query parameters, so a link is the whole state of the screen. `/docs` is the OpenAPI view of the same numbers.
+
+## How a bid is chosen
+
+London is on GMT for the whole of this January, so the civil clock and the published auction clock are the same. The cutoff is the gate minus the lead you need (0, 15, or 30 minutes). Among WINDFOR issues with `publishTime` at or before that cutoff, the bid takes the latest one that covers at least 20 of the 24 delivery hours. A fragment of a newer run cannot replace a complete older issue. One issue covers the whole day. A later issue can be opened from the tape. It is drawn, and it is marked as not in the bid.
+
+WINDFOR is an hourly megawatt value. FUELHH wind is a half-hour average. Each settlement period takes the forecast of the clock hour that contains it, so the two periods in an hour share one number. The book shows all 48 periods. The headline error scores each hour once, using the mean of the two half-hour outturns, so the same forecast is not counted twice. Energy in an hour is the megawatt value times one hour.
+
+Thursday 15 January 2026 had no 11:30 issue and an extra 12:25 issue. That slot is not invented on the other days.
+
+## AI tools
+
+This application was built in Cursor, with Grok 4.7 as the coding agent. The agent wrote the application, the tests, and this README. The forecasts, the outturns, and every score are computed in Python from the Elexon extracts in `data/raw`. No figure on the desk or the accuracy page is generated by a model.
+
+## Video and the submission form
+
+`REVIEW.md` is a script for the ten-minute video: five minutes for the desk that would buy the power, then five minutes for the technical review. Recording and the unlisted YouTube upload have to be done from a person's own account.
+
+The form named in the brief, "Full Stack SWE challenge submission v4", is not published at a URL this repository can point to. Submit the YouTube link, the GitHub link, and the running application link there, and open each of them in a private window first.
